@@ -153,7 +153,10 @@ if __name__ == "__main__":
                 retry_stats = retrying.statistics
                 if len(retry_stats.keys()) > 0:
                     logger.info(f"retrying stats: {retry_stats}")
-                pbar.set_postfix({'last tok/s': tps, 'avg tok/s': usage_stats.total_tokens / usage_stats.duration})
+                postfix = {'last tok/s': tps}
+                if usage_stats.total_tokens > 0:
+                    postfix['avg tok/s'] = usage_stats.total_tokens / usage_stats.duration
+                pbar.set_postfix(postfix)
                 pbar.update(1)
                 write_result_to_file(result, write_file_name)
 
