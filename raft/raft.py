@@ -63,6 +63,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=2, help="The number of worker threads to use to generate the dataset")
     parser.add_argument("--auto-clean-checkpoints", type=bool, default=False, help="Whether to auto clean the checkpoints after the dataset is generated")
     parser.add_argument("--qa-threshold", type=int, default=None, help="The number of Q/A samples to generate after which to stop the generation process. Defaults to None, which means generating Q/A samples for all documents")
+    parser.add_argument("--embedding-env-prefix", type=str, default="EMBEDDING", help="The OPENAI env var prefix. Defaults to EMBEDDING for EMBEDDING_OPENAI_BASE_URL and EMBEDDING_OPENAI_API_KEY")
+    parser.add_argument("--completion-env-prefix", type=str, default="COMPLETION", help="The OPENAI env var prefix. Defaults to COMPLETION for COMPLETION_OPENAI_BASE_URL and COMPLETION_OPENAI_API_KEY")
 
     args = parser.parse_args()
     return args
@@ -73,7 +75,8 @@ def get_chunks(
     doctype: DocType = "pdf", 
     chunk_size: int = 512, 
     openai_key: str | None = None,
-    model: str = None
+    model: str = None,
+    embedding_env_prefix: str = None
 ) -> list[str]:
     """
     Takes in a `data_path` and `doctype`, retrieves the document, breaks it down into chunks of size
@@ -94,7 +97,7 @@ def get_chunks(
                 raise TypeError(f"API documentation is not in the format specified by the Gorilla API Store: Missing field `{field}`")
 
     else:
-        embeddings = build_langchain_embeddings(openai_api_key=openai_key, model=model)
+        embeddings = build_langchain_embeddings(openai_api_key=openai_key, model=model, env_prefix=embedding_env_prefix)
         chunks = []
         file_paths = [data_path]
         if data_path.is_dir():
@@ -382,6 +385,7 @@ def build_or_load_chunks(
         OPENAPI_API_KEY: str,
         embedding_model: str,
         checkpoints_dir: Path, 
+        embedding_env_prefix: str,
         ):
     """
     Builds chunks and checkpoints them if asked
@@ -395,7 +399,7 @@ def build_or_load_chunks(
         chunks = chunks_ds['chunk']
 
     if not chunks:
-        chunks = get_chunks(datapath, doctype, CHUNK_SIZE, OPENAPI_API_KEY, model=embedding_model)
+        chunks = get_chunks(datapath, doctype, CHUNK_SIZE, OPENAPI_API_KEY, model=embedding_model, embedding_env_prefix=embedding_env_prefix)
 
     if not chunks_ds:
         chunks_table = pa.table({ "chunk": chunks })
@@ -418,6 +422,7 @@ def main():
 
     client = build_openai_client(
         api_key=OPENAPI_API_KEY,
+        env_prefix = args.completion_env_prefix
     )
     chat_completer = ChatCompleter(client)
 
@@ -436,7 +441,7 @@ def main():
     datasets.disable_progress_bars()
 
     # Chunks
-    chunks = build_or_load_chunks(datapath, args.doctype, CHUNK_SIZE, OPENAPI_API_KEY, args.embedding_model, checkpoints_dir)
+    chunks = build_or_load_chunks(datapath, args.doctype, CHUNK_SIZE, OPENAPI_API_KEY, args.embedding_model, checkpoints_dir, embedding_env_prefix=args.embedding_env_prefix)
 
     cot_answers_ds = None
 

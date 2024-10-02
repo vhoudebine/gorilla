@@ -28,13 +28,13 @@ def build_openai_client(env_prefix : str = "COMPLETION", **kwargs: Any) -> OpenA
             client = OpenAI(**kwargs)
         return client
 
-def build_langchain_embeddings(**kwargs: Any) -> OpenAIEmbeddings:
+def build_langchain_embeddings(env_prefix : str = "EMBEDDING", **kwargs: Any) -> OpenAIEmbeddings:
     """
     Build OpenAI embeddings client based on the environment variables.
     """
 
     kwargs = _remove_empty_values(kwargs)
-    env = read_env_config("EMBEDDING")
+    env = read_env_config(env_prefix)
     with set_env(**env):
         if is_azure():
             auth_args = _get_azure_auth_client_args()
