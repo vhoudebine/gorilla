@@ -139,6 +139,7 @@ if __name__ == "__main__":
     usage_stats = UsageStats()
     tps = 0
     retrying: Retrying = retry_complete.retry
+    error_count = 0
     with tqdm(total=len(inputs), unit="answers") as pbar:
         with ThreadPoolExecutor(num_workers) as executor:
             futures = [executor.submit(get_answer, input) for input in inputs]
@@ -156,6 +157,9 @@ if __name__ == "__main__":
                 postfix = {'last tok/s': tps}
                 if usage_stats.total_tokens > 0:
                     postfix['avg tok/s'] = usage_stats.total_tokens / usage_stats.duration
+                if 'error' in result:
+                    error_count += 1
+                    postfix['errors'] = error_count
                 pbar.set_postfix(postfix)
                 pbar.update(1)
                 write_result_to_file(result, write_file_name)
@@ -163,4 +167,5 @@ if __name__ == "__main__":
     end_time = time.time()
     logger.info(f"Wrote evaluation results to {write_file_name}")
     logger.info(f"total time used: {end_time - start_time}")
-    
+    if error_count > 0:
+        logger.error(f"Total errors: {error_count} out of {len(inputs)} questions")
