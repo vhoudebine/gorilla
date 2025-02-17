@@ -66,9 +66,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--qa-threshold", type=int, default=None, help="The number of Q/A samples to generate after which to stop the generation process. Defaults to None, which means generating Q/A samples for all documents")
     parser.add_argument("--embedding-env-prefix", type=str, default="EMBEDDING", help="The OPENAI env var prefix. Defaults to EMBEDDING for EMBEDDING_OPENAI_BASE_URL and EMBEDDING_OPENAI_API_KEY")
     parser.add_argument("--completion-env-prefix", type=str, default="COMPLETION", help="The OPENAI env var prefix. Defaults to COMPLETION for COMPLETION_OPENAI_BASE_URL and COMPLETION_OPENAI_API_KEY")
-    parser.add_argument("--azure-ai-search-endpoint", type=str, default=None, help="The Azure AI Search endpoint to use to retrieve documents")
     parser.add_argument("--azure-ai-search-index", type=str, default=None, help="The Azure AI Search index to use to retrieve documents")
-    parser.add_argument("--azure-ai-search-key", type=str, default=None, help="The Azure AI Search key to use to retrieve documents")
     parser.add_argument("--azure-ai-search-sample-size", type=int, default=None, help="The number of documents to sample from the Azure AI Search index")
     parser.add_argument("--azure-ai-search-content-field-name", type=str, default=None, help="The name of the content field in the Azure AI Search index")
 
@@ -83,9 +81,7 @@ def get_chunks(
     openai_key: str | None = None,
     model: str = None,
     embedding_env_prefix: str = None,
-    search_endpoint: str = None,
     search_index: str = None,
-    search_key: str = None,
     search_sample_size: int = None,
     content_field_name: str = None
 ) -> list[str]:
@@ -112,9 +108,7 @@ def get_chunks(
             file_path=None,
             doctype=doctype,
             chunk_size=chunk_size,
-            search_endpoint=search_endpoint,
             search_index=search_index,
-            search_key=search_key,
             search_sample_size=search_sample_size,
             content_field_name=content_field_name
         )
@@ -152,9 +146,7 @@ def get_doc_chunks(
     
     if doctype == "azure-ai-search-index":
         client = AzureSearchClient(
-            search_endpoint, 
-            search_index, 
-            search_key
+            search_index 
             )
         if search_sample_size:
             data = client.get_random_sample(search_sample_size)
@@ -436,9 +428,7 @@ def build_or_load_chunks(
         embedding_model: str,
         checkpoints_dir: Path, 
         embedding_env_prefix: str,
-        search_endpoint: str = None,
         search_index: str = None,
-        search_key: str = None,
         search_sample_size: int = None,
         content_field_name: str = None
         ):
@@ -460,9 +450,7 @@ def build_or_load_chunks(
                             OPENAPI_API_KEY, 
                             model=embedding_model, 
                             embedding_env_prefix=embedding_env_prefix,
-                            search_endpoint=search_endpoint,
                             search_index=search_index,
-                            search_key=search_key,
                             search_sample_size=search_sample_size,
                             content_field_name=content_field_name
                             )
@@ -506,9 +494,7 @@ def main():
 
     datasets.disable_progress_bars()
 
-    AZURE_AI_SEARCH_ENDPOINT = args.azure_ai_search_endpoint
     AZURE_AI_SEARCH_INDEX = args.azure_ai_search_index
-    AZURE_AI_SEARCH_KEY = args.azure_ai_search_key
     AZURE_AI_SEARCH_SAMPLE_SIZE = args.azure_ai_search_sample_size
     AZURE_AI_SEARCH_CONTENT_FIELD_NAME = args.azure_ai_search_content_field_name
     # Chunks
@@ -519,9 +505,7 @@ def main():
                                    args.embedding_model, 
                                    checkpoints_dir, 
                                    embedding_env_prefix=args.embedding_env_prefix,
-                                   search_endpoint=AZURE_AI_SEARCH_ENDPOINT,
                                    search_index=AZURE_AI_SEARCH_INDEX,
-                                   search_key=AZURE_AI_SEARCH_KEY,
                                    search_sample_size=AZURE_AI_SEARCH_SAMPLE_SIZE,
                                    content_field_name=AZURE_AI_SEARCH_CONTENT_FIELD_NAME
                                    )
