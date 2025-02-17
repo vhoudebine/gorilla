@@ -17,6 +17,7 @@ import random
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_openai.embeddings import OpenAIEmbeddings
 from client_utils import build_openai_client, build_langchain_embeddings, UsageStats, ChatCompleter
+from search_client_utils import AzureSearchClient
 from math import ceil
 from format import DatasetConverter, datasetFormats, outputDatasetTypes
 from pathlib import Path
@@ -32,7 +33,7 @@ load_dotenv()  # take environment variables from .env.
 
 logger = logging.getLogger("raft")
 
-DocType = Literal["api", "pdf", "json", "txt"]
+DocType = Literal["api", "pdf", "json", "txt", "azure-ai-search-index"]
 docTypes = list(get_args(DocType))
 
 SystemPromptKey = Literal["gpt", "llama"]
@@ -65,6 +66,11 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--qa-threshold", type=int, default=None, help="The number of Q/A samples to generate after which to stop the generation process. Defaults to None, which means generating Q/A samples for all documents")
     parser.add_argument("--embedding-env-prefix", type=str, default="EMBEDDING", help="The OPENAI env var prefix. Defaults to EMBEDDING for EMBEDDING_OPENAI_BASE_URL and EMBEDDING_OPENAI_API_KEY")
     parser.add_argument("--completion-env-prefix", type=str, default="COMPLETION", help="The OPENAI env var prefix. Defaults to COMPLETION for COMPLETION_OPENAI_BASE_URL and COMPLETION_OPENAI_API_KEY")
+    parser.add_argument("--azure-ai-search-endpoint", type=str, default=None, help="The Azure AI Search endpoint to use to retrieve documents")
+    parser.add_argument("--azure-ai-search-index", type=str, default=None, help="The Azure AI Search index to use to retrieve documents")
+    parser.add_argument("--azure-ai-search-key", type=str, default=None, help="The Azure AI Search key to use to retrieve documents")
+    parser.add_argument("--azure-ai-search-sample-size", type=int, default=None, help="The number of documents to sample from the Azure AI Search index")
+    parser.add_argument("--azure-ai-search-content-field-name", type=str, default=None, help="The name of the content field in the Azure AI Search index")
 
     args = parser.parse_args()
     return args
@@ -76,14 +82,18 @@ def get_chunks(
     chunk_size: int = 512, 
     openai_key: str | None = None,
     model: str = None,
-    embedding_env_prefix: str = None
+    embedding_env_prefix: str = None,
+    search_endpoint: str = None,
+    search_index: str = None,
+    search_key: str = None,
+    search_sample_size: int = None,
+    content_field_name: str = None
 ) -> list[str]:
     """
     Takes in a `data_path` and `doctype`, retrieves the document, breaks it down into chunks of size
     `chunk_size`, and returns the chunks.
     """
     chunks = []
-
     logger.info(f"Retrieving chunks from {data_path} of type {doctype} using the {model} model.")
 
     if doctype == "api":
@@ -96,6 +106,18 @@ def get_chunks(
             if field not in chunks[0]:
                 raise TypeError(f"API documentation is not in the format specified by the Gorilla API Store: Missing field `{field}`")
 
+    elif doctype == "azure-ai-search-index":
+        chunks = get_doc_chunks(
+            embeddings=None,
+            file_path=None,
+            doctype=doctype,
+            chunk_size=chunk_size,
+            search_endpoint=search_endpoint,
+            search_index=search_index,
+            search_key=search_key,
+            search_sample_size=search_sample_size,
+            content_field_name=content_field_name
+        )
     else:
         embeddings = build_langchain_embeddings(openai_api_key=openai_key, model=model, env_prefix=embedding_env_prefix)
         chunks = []
@@ -121,33 +143,61 @@ def get_doc_chunks(
     file_path: Path, 
     doctype: DocType = "pdf", 
     chunk_size: int = 512,
+    search_endpoint: str = None,
+    search_index: str = None,
+    search_key: str = None,
+    search_sample_size: int = None,
+    content_field_name: str = None
  ) -> list[str]:
-    if doctype == "json":
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        text = data["text"]
-    elif doctype == "pdf":
-        text = ""
-        with open(file_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            num_pages = len(reader.pages)
-            for page_num in range(num_pages):
-                page = reader.pages[page_num]
-                text += page.extract_text()
-    elif doctype == "txt":
-        with open(file_path, 'r') as file:
-            data = file.read()
-        text = str(data)
-    else:
-        raise TypeError("Document is not one of the accepted types: api, pdf, json, txt")
     
-    num_chunks = ceil(len(text) / chunk_size)
-    logger.debug(f"Splitting text into {num_chunks} chunks.")
+    if doctype == "azure-ai-search-index":
+        client = AzureSearchClient(
+            search_endpoint, 
+            search_index, 
+            search_key
+            )
+        if search_sample_size:
+            data = client.get_random_sample(search_sample_size)
+        else:
+            data = client.get_all_documents()
 
-    text_splitter = SemanticChunker(embeddings, number_of_chunks=num_chunks)
-    chunks = text_splitter.create_documents([text])
-    chunks = [chunk.page_content for chunk in chunks]
-    return chunks
+        num_chunks = len(data)
+        logger.info(f"Retrieved {num_chunks} chunks from Azure AI Search Index {search_index}.")
+        if len(data) == 0:
+            raise ValueError(f"No documents found in Azure AI Search Index {search_index}.")
+        elif len(data)>0:
+            if content_field_name not in data[0]:
+                raise ValueError(f"Content field `{content_field_name}` not found in Azure AI Search Index {search_index}.")
+            else:
+                chunks = [doc.get(content_field_name) for doc in data]
+                return chunks
+    else:
+        if doctype == "json":
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+            text = data["text"]
+        elif doctype == "pdf":
+            text = ""
+            with open(file_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                num_pages = len(reader.pages)
+                for page_num in range(num_pages):
+                    page = reader.pages[page_num]
+                    text += page.extract_text()
+        elif doctype == "txt":
+            with open(file_path, 'r') as file:
+                data = file.read()
+            text = str(data)
+        else:
+            raise TypeError("Document is not one of the accepted types: api, pdf, json, txt")
+        
+        num_chunks = ceil(len(text) / chunk_size)
+        logger.debug(f"Splitting text into {num_chunks} chunks.")
+
+        text_splitter = SemanticChunker(embeddings, number_of_chunks=num_chunks)
+        chunks = text_splitter.create_documents([text])
+        chunks = [chunk.page_content for chunk in chunks]
+        return chunks
 
 def generate_chunk_instructions(chat_completer: ChatCompleter, chunk: Any, x=5, model: str = None) -> list[str]:
     """
@@ -386,6 +436,11 @@ def build_or_load_chunks(
         embedding_model: str,
         checkpoints_dir: Path, 
         embedding_env_prefix: str,
+        search_endpoint: str = None,
+        search_index: str = None,
+        search_key: str = None,
+        search_sample_size: int = None,
+        content_field_name: str = None
         ):
     """
     Builds chunks and checkpoints them if asked
@@ -399,7 +454,18 @@ def build_or_load_chunks(
         chunks = chunks_ds['chunk']
 
     if not chunks:
-        chunks = get_chunks(datapath, doctype, CHUNK_SIZE, OPENAPI_API_KEY, model=embedding_model, embedding_env_prefix=embedding_env_prefix)
+        chunks = get_chunks(datapath, 
+                            doctype, 
+                            CHUNK_SIZE, 
+                            OPENAPI_API_KEY, 
+                            model=embedding_model, 
+                            embedding_env_prefix=embedding_env_prefix,
+                            search_endpoint=search_endpoint,
+                            search_index=search_index,
+                            search_key=search_key,
+                            search_sample_size=search_sample_size,
+                            content_field_name=content_field_name
+                            )
 
     if not chunks_ds:
         chunks_table = pa.table({ "chunk": chunks })
@@ -440,8 +506,25 @@ def main():
 
     datasets.disable_progress_bars()
 
+    AZURE_AI_SEARCH_ENDPOINT = args.azure_ai_search_endpoint
+    AZURE_AI_SEARCH_INDEX = args.azure_ai_search_index
+    AZURE_AI_SEARCH_KEY = args.azure_ai_search_key
+    AZURE_AI_SEARCH_SAMPLE_SIZE = args.azure_ai_search_sample_size
+    AZURE_AI_SEARCH_CONTENT_FIELD_NAME = args.azure_ai_search_content_field_name
     # Chunks
-    chunks = build_or_load_chunks(datapath, args.doctype, CHUNK_SIZE, OPENAPI_API_KEY, args.embedding_model, checkpoints_dir, embedding_env_prefix=args.embedding_env_prefix)
+    chunks = build_or_load_chunks(datapath,
+                                   args.doctype, 
+                                   CHUNK_SIZE, 
+                                   OPENAPI_API_KEY, 
+                                   args.embedding_model, 
+                                   checkpoints_dir, 
+                                   embedding_env_prefix=args.embedding_env_prefix,
+                                   search_endpoint=AZURE_AI_SEARCH_ENDPOINT,
+                                   search_index=AZURE_AI_SEARCH_INDEX,
+                                   search_key=AZURE_AI_SEARCH_KEY,
+                                   search_sample_size=AZURE_AI_SEARCH_SAMPLE_SIZE,
+                                   content_field_name=AZURE_AI_SEARCH_CONTENT_FIELD_NAME
+                                   )
 
     cot_answers_ds = None
 

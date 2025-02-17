@@ -39,3 +39,4 @@ berkeley-function-call-leaderboard/score/
 
 .direnv/
 .venv
+raft/test.ipynb
